@@ -581,6 +581,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
         for n in range(p.n_iter):
             p.iteration = n
 
+            skp = state.skipped
             if state.skipped:
                 state.skipped = False
 
@@ -611,7 +612,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                 shared.state.job = f"Batch {n+1} out of {p.n_iter}"
 
             with devices.autocast():
-                samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts)
+                samples_ddim = p.sample(conditioning=c, unconditional_conditioning=uc, seeds=seeds, subseeds=subseeds, subseed_strength=p.subseed_strength, prompts=prompts, skp=skp)
 
             x_samples_ddim = [decode_first_stage(p.sd_model, samples_ddim[i:i+1].to(dtype=devices.dtype_vae))[0].cpu() for i in range(samples_ddim.size(0))]
             for x in x_samples_ddim:
@@ -653,7 +654,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
 
                 image = apply_overlay(image, p.paste_to, i, p.overlay_images)
 
-                if opts.samples_save and not p.do_not_save_samples:
+                if opts.samples_save and not p.do_not_save_samples and not skp:
                     images.save_image(image, p.outpath_samples, "", seeds[i], prompts[i], opts.samples_format, info=infotext(n, i), p=p)
 
                 text = infotext(n, i)
@@ -798,7 +799,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
             if self.hr_upscaler is not None:
                 self.extra_generation_params["Hires upscaler"] = self.hr_upscaler
 
-    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
+    def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts, skp = False):
         self.sampler = sd_samplers.create_sampler(self.sampler_name, self.sd_model)
 
         latent_scale_mode = shared.latent_upscale_modes.get(self.hr_upscaler, None) if self.hr_upscaler is not None else shared.latent_upscale_modes.get(shared.latent_upscale_default_mode, "nearest")
@@ -816,8 +817,7 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
 
         def save_intermediate(image, index):
             """saves image before applying hires fix, if enabled in options; takes as an argument either an image or batch with latent space images"""
-
-            if not opts.save or self.do_not_save_samples or not opts.save_images_before_highres_fix:
+            if not opts.save or self.do_not_save_samples or not opts.save_images_before_highres_fix or skp:
                 return
 
             if not isinstance(image, Image.Image):
